@@ -184,6 +184,41 @@ def InstanceOp : Handshake_Op<"instance", [
   }];
 }
 
+// This operation is very similar to the handshake.instance operation. The difference is that handshake.instance
+// operation references a handshake funcion and this operation references a module outside from the handshake dialect
+def ExternalInstanceOp : Handshake_Op<"external_instance", []> {
+  let summary = "external module instantiate operation";
+  let description = [{
+    The `external_instance` operation represents the instantiation of an external module,
+    not defined in the Handshake dialect. To use this operation you must specify two
+    attributes, "module" the name of the external module, and "interface" the interface
+    of the external module. Examples for interface may be a calyx module or a pipeline
+    module, with the corresponding inputs and outputs. These two attributes are necessary,
+    that when lowering the operation, it can properly wrap arround the external module,
+    i.e. add the handshaking logic. All inputs to this operation must be synchronized by the
+    handshake.sync operation. Each output will be handshaked with the corresponding consumer.
+    Example:
+    ```mlir
+    %arg0Sync, %arg1Sync = handshake.sync %arg0, %arg1 : i32, i32
+    %0 = handshake.external_instance(%arg0Sync, %arg1Sync) {module = "complex_arith", interface = "pipeline"} : (i32, i32) -> (i32)
+    ```
+  }];
+
+  let arguments = (ins Variadic<AnyType>:$operands, StrAttr:$module, StrAttr:$interface);
+  let results = (outs Variadic<AnyType>:$results);
+
+  let extraClassDeclaration = [{
+    /// Get the type signature of the external Module
+    FunctionType getModuleType();
+
+  }];
+  
+
+  let assemblyFormat = [{
+    `(` $operands `)` attr-dict `:` functional-type($operands, $results)
+  }];
+}
+
 // This is almost exactly like a standard FuncOp, except that it has some
 // extra verification conditions.  In particular, each Value must
 // only have a single use.
