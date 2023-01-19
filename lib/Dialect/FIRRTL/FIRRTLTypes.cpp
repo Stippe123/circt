@@ -190,7 +190,7 @@ static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
                                        parseBundleElement))
       return failure();
 
-    return result = BundleType::get(elements, context), success();
+    return result = BundleType::get(context, elements), success();
   }
 
   if (name.equals("vector")) {
@@ -408,7 +408,7 @@ FIRRTLBaseType FIRRTLBaseType::getMaskType() {
         for (auto elt : bundleType)
           newElements.push_back(
               {elt.name, false /* FIXME */, elt.type.getMaskType()});
-        return BundleType::get(newElements, this->getContext());
+        return BundleType::get(this->getContext(), newElements);
       })
       .Case<FVectorType>([](FVectorType vectorType) {
         return FVectorType::get(vectorType.getElementType().getMaskType(),
@@ -433,7 +433,7 @@ FIRRTLBaseType FIRRTLBaseType::getWidthlessType() {
         for (auto elt : a)
           newElements.push_back(
               {elt.name, elt.isFlip, elt.type.getWidthlessType()});
-        return BundleType::get(newElements, this->getContext());
+        return BundleType::get(this->getContext(), newElements);
       })
       .Case<FVectorType>([](auto a) {
         return FVectorType::get(a.getElementType().getWidthlessType(),
@@ -474,8 +474,8 @@ bool FIRRTLBaseType::isResetType() {
       .Default([](Type) { return false; });
 }
 
-unsigned FIRRTLBaseType::getMaxFieldID() {
-  return TypeSwitch<FIRRTLBaseType, int32_t>(*this)
+uint64_t FIRRTLBaseType::getMaxFieldID() {
+  return TypeSwitch<FIRRTLBaseType, uint64_t>(*this)
       .Case<AnalogType, ClockType, ResetType, AsyncResetType, SIntType,
             UIntType>([](Type) { return 0; })
       .Case<BundleType, FVectorType>(
@@ -486,9 +486,9 @@ unsigned FIRRTLBaseType::getMaxFieldID() {
       });
 }
 
-std::pair<FIRRTLBaseType, unsigned>
-FIRRTLBaseType::getSubTypeByFieldID(unsigned fieldID) {
-  return TypeSwitch<FIRRTLBaseType, std::pair<FIRRTLBaseType, unsigned>>(*this)
+std::pair<FIRRTLBaseType, uint64_t>
+FIRRTLBaseType::getSubTypeByFieldID(uint64_t fieldID) {
+  return TypeSwitch<FIRRTLBaseType, std::pair<FIRRTLBaseType, uint64_t>>(*this)
       .Case<AnalogType, ClockType, ResetType, AsyncResetType, SIntType,
             UIntType>([&](FIRRTLBaseType t) {
         assert(!fieldID && "non-aggregate types must have a field id of 0");
@@ -502,16 +502,16 @@ FIRRTLBaseType::getSubTypeByFieldID(unsigned fieldID) {
       });
 }
 
-FIRRTLBaseType FIRRTLBaseType::getFinalTypeByFieldID(unsigned fieldID) {
-  std::pair<FIRRTLBaseType, unsigned> pair(*this, fieldID);
+FIRRTLBaseType FIRRTLBaseType::getFinalTypeByFieldID(uint64_t fieldID) {
+  std::pair<FIRRTLBaseType, uint64_t> pair(*this, fieldID);
   while (pair.second)
     pair = pair.first.getSubTypeByFieldID(pair.second);
   return pair.first;
 }
 
-std::pair<unsigned, bool> FIRRTLBaseType::rootChildFieldID(unsigned fieldID,
-                                                           unsigned index) {
-  return TypeSwitch<FIRRTLBaseType, std::pair<unsigned, bool>>(*this)
+std::pair<uint64_t, bool> FIRRTLBaseType::rootChildFieldID(uint64_t fieldID,
+                                                           uint64_t index) {
+  return TypeSwitch<FIRRTLBaseType, std::pair<uint64_t, bool>>(*this)
       .Case<AnalogType, ClockType, ResetType, AsyncResetType, SIntType,
             UIntType>([&](Type) { return std::make_pair(0, fieldID == 0); })
       .Case<BundleType, FVectorType>(
@@ -522,8 +522,8 @@ std::pair<unsigned, bool> FIRRTLBaseType::rootChildFieldID(unsigned fieldID,
       });
 }
 
-unsigned FIRRTLBaseType::getGroundFields() const {
-  return TypeSwitch<FIRRTLBaseType, unsigned>(*this)
+uint64_t FIRRTLBaseType::getGroundFields() const {
+  return TypeSwitch<FIRRTLBaseType, uint64_t>(*this)
       .Case<BundleType>([](auto type) {
         unsigned sum = 0;
         for (auto &field : type.getElements())
@@ -769,24 +769,13 @@ std::optional<int32_t> UIntType::getWidth() {
 // Bundle Type
 //===----------------------------------------------------------------------===//
 
-namespace circt {
-namespace firrtl {
-llvm::hash_code hash_value(const BundleType::BundleElement &arg) {
-  return mlir::hash_value(arg.name) ^ mlir::hash_value(arg.type);
-}
-} // namespace firrtl
-} // namespace circt
-
-namespace circt {
-namespace firrtl {
-namespace detail {
-struct BundleTypeStorage : mlir::TypeStorage {
+struct circt::firrtl::detail::BundleTypeStorage : mlir::TypeStorage {
   using KeyTy = ArrayRef<BundleType::BundleElement>;
 
   BundleTypeStorage(KeyTy elements)
       : elements(elements.begin(), elements.end()) {
     RecursiveTypeProperties props{true, false, false};
-    unsigned fieldID = 0;
+    uint64_t fieldID = 0;
     fieldIDs.reserve(elements.size());
     for (auto &element : elements) {
       auto type = element.type;
@@ -815,23 +804,14 @@ struct BundleTypeStorage : mlir::TypeStorage {
   }
 
   SmallVector<BundleType::BundleElement, 4> elements;
-  SmallVector<unsigned, 4> fieldIDs;
-  unsigned maxFieldID;
+  SmallVector<uint64_t, 4> fieldIDs;
+  uint64_t maxFieldID;
 
   /// This holds the bits for the type's recursive properties, and can hold a
   /// pointer to a passive version of the type.
   llvm::PointerIntPair<Type, RecursiveTypeProperties::numBits, unsigned>
       passiveContainsAnalogTypeInfo;
 };
-
-} // namespace detail
-} // namespace firrtl
-} // namespace circt
-
-BundleType BundleType::get(ArrayRef<BundleElement> elements,
-                           MLIRContext *context) {
-  return Base::get(context, elements);
-}
 
 auto BundleType::getElements() const -> ArrayRef<BundleElement> {
   return getImpl()->elements;
@@ -864,7 +844,7 @@ FIRRTLBaseType BundleType::getPassiveType() {
     newElements.push_back({elt.name, false, elt.type.getPassiveType()});
   }
 
-  auto passiveType = BundleType::get(newElements, getContext());
+  auto passiveType = BundleType::get(getContext(), newElements);
   impl->passiveContainsAnalogTypeInfo.setPointer(passiveType);
   return passiveType;
 }
@@ -932,19 +912,19 @@ FIRRTLBaseType BundleType::getElementType(size_t index) {
   return getElements()[index].type;
 }
 
-unsigned BundleType::getFieldID(unsigned index) {
+uint64_t BundleType::getFieldID(uint64_t index) {
   return getImpl()->fieldIDs[index];
 }
 
-unsigned BundleType::getIndexForFieldID(unsigned fieldID) {
+uint64_t BundleType::getIndexForFieldID(uint64_t fieldID) {
   assert(getElements().size() && "Bundle must have >0 fields");
   auto fieldIDs = getImpl()->fieldIDs;
   auto *it = std::prev(llvm::upper_bound(fieldIDs, fieldID));
   return std::distance(fieldIDs.begin(), it);
 }
 
-std::pair<FIRRTLBaseType, unsigned>
-BundleType::getSubTypeByFieldID(unsigned fieldID) {
+std::pair<FIRRTLBaseType, uint64_t>
+BundleType::getSubTypeByFieldID(uint64_t fieldID) {
   if (fieldID == 0)
     return {*this, 0};
   auto fieldIDs = getImpl()->fieldIDs;
@@ -954,10 +934,10 @@ BundleType::getSubTypeByFieldID(unsigned fieldID) {
   return {subfieldType, subfieldID};
 }
 
-unsigned BundleType::getMaxFieldID() { return getImpl()->maxFieldID; }
+uint64_t BundleType::getMaxFieldID() { return getImpl()->maxFieldID; }
 
-std::pair<unsigned, bool> BundleType::rootChildFieldID(unsigned fieldID,
-                                                       unsigned index) {
+std::pair<uint64_t, bool> BundleType::rootChildFieldID(uint64_t fieldID,
+                                                       uint64_t index) {
   auto childRoot = getFieldID(index);
   auto rangeEnd = index + 1 >= getNumElements() ? getMaxFieldID()
                                                 : (getFieldID(index + 1) - 1);
@@ -966,25 +946,23 @@ std::pair<unsigned, bool> BundleType::rootChildFieldID(unsigned fieldID,
 }
 
 //===----------------------------------------------------------------------===//
-// Vector Type
+// FVectorType
 //===----------------------------------------------------------------------===//
 
-namespace circt {
-namespace firrtl {
-namespace detail {
-struct VectorTypeStorage : mlir::TypeStorage {
+struct circt::firrtl::detail::FVectorTypeStorage : mlir::TypeStorage {
   using KeyTy = std::pair<FIRRTLBaseType, size_t>;
 
-  VectorTypeStorage(KeyTy value) : value(value) {
+  FVectorTypeStorage(KeyTy value) : value(value) {
     auto properties = value.first.getRecursiveTypeProperties();
     passiveContainsAnalogTypeInfo.setInt(properties.toFlags());
   }
 
   bool operator==(const KeyTy &key) const { return key == value; }
 
-  static VectorTypeStorage *construct(TypeStorageAllocator &allocator,
-                                      KeyTy key) {
-    return new (allocator.allocate<VectorTypeStorage>()) VectorTypeStorage(key);
+  static FVectorTypeStorage *construct(TypeStorageAllocator &allocator,
+                                       KeyTy key) {
+    return new (allocator.allocate<FVectorTypeStorage>())
+        FVectorTypeStorage(key);
   }
 
   KeyTy value;
@@ -995,18 +973,16 @@ struct VectorTypeStorage : mlir::TypeStorage {
       passiveContainsAnalogTypeInfo;
 };
 
-} // namespace detail
-} // namespace firrtl
-} // namespace circt
-
 FVectorType FVectorType::get(FIRRTLBaseType elementType, size_t numElements) {
   return Base::get(elementType.getContext(),
                    std::make_pair(elementType, numElements));
 }
 
-FIRRTLBaseType FVectorType::getElementType() { return getImpl()->value.first; }
+FIRRTLBaseType FVectorType::getElementType() const {
+  return getImpl()->value.first;
+}
 
-size_t FVectorType::getNumElements() { return getImpl()->value.second; }
+size_t FVectorType::getNumElements() const { return getImpl()->value.second; }
 
 /// Return the recursive properties of the type.
 RecursiveTypeProperties FVectorType::getRecursiveTypeProperties() {
@@ -1035,30 +1011,30 @@ FIRRTLBaseType FVectorType::getPassiveType() {
   return passiveType;
 }
 
-size_t FVectorType::getFieldID(size_t index) {
+uint64_t FVectorType::getFieldID(uint64_t index) {
   return 1 + index * (getElementType().getMaxFieldID() + 1);
 }
 
-size_t FVectorType::getIndexForFieldID(size_t fieldID) {
+uint64_t FVectorType::getIndexForFieldID(uint64_t fieldID) {
   assert(fieldID && "fieldID must be at least 1");
   // Divide the field ID by the number of fieldID's per element.
   return (fieldID - 1) / (getElementType().getMaxFieldID() + 1);
 }
 
-std::pair<FIRRTLBaseType, size_t>
-FVectorType::getSubTypeByFieldID(size_t fieldID) {
+std::pair<FIRRTLBaseType, uint64_t>
+FVectorType::getSubTypeByFieldID(uint64_t fieldID) {
   if (fieldID == 0)
     return {*this, 0};
   auto subfieldIndex = getIndexForFieldID(fieldID);
   return {getElementType(), fieldID - getFieldID(subfieldIndex)};
 }
 
-size_t FVectorType::getMaxFieldID() {
+uint64_t FVectorType::getMaxFieldID() {
   return getNumElements() * (getElementType().getMaxFieldID() + 1);
 }
 
-std::pair<size_t, bool> FVectorType::rootChildFieldID(size_t fieldID,
-                                                      size_t index) {
+std::pair<uint64_t, bool> FVectorType::rootChildFieldID(uint64_t fieldID,
+                                                        uint64_t index) {
   auto childRoot = getFieldID(index);
   auto rangeEnd =
       index >= getNumElements() ? getMaxFieldID() : (getFieldID(index + 1) - 1);

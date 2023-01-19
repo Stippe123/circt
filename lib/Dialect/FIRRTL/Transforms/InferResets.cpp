@@ -985,8 +985,10 @@ FailureOr<ResetKind> InferResetsPass::inferReset(ResetNetwork net) {
   // Handle the case where we have no votes for either kind.
   if (asyncDrives == 0 && syncDrives == 0 && invalidDrives == 0) {
     ResetSignal root = guessRoot(net);
-    mlir::emitError(root.field.getValue().getLoc())
-        << "reset network never driven with concrete type";
+    auto diag = mlir::emitError(root.field.getValue().getLoc())
+                << "reset network never driven with concrete type";
+    for (ResetSignal signal : net)
+      diag.attachNote(signal.field.getLoc()) << "here: ";
     return failure();
   }
 
@@ -1144,7 +1146,7 @@ static FIRRTLBaseType updateType(FIRRTLBaseType oldType, unsigned fieldID,
                                                   bundleType.end());
     fields[index].type = updateType(
         fields[index].type, fieldID - getFieldID(bundleType, index), fieldType);
-    return BundleType::get(fields, oldType.getContext());
+    return BundleType::get(oldType.getContext(), fields);
   }
 
   // If this is a vector type, update the element type.

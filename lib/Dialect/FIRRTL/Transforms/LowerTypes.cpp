@@ -131,8 +131,12 @@ static bool isPreservableAggregateType(Type type,
   if (mode == PreserveAggregate::None)
     return false;
 
-  auto firrtlType = type.isa<RefType>() ? type.cast<RefType>().getType()
-                                        : type.dyn_cast<FIRRTLBaseType>();
+  // FIXME: Don't presereve RefType for now. This is workaround for MemTap which
+  // causes type mismatches (issue 4479).
+  if (type.isa<RefType>())
+    return false;
+
+  auto firrtlType = type.dyn_cast<FIRRTLBaseType>();
   if (!firrtlType)
     return false;
 
@@ -510,7 +514,7 @@ ArrayAttr TypeLoweringVisitor::filterAnnotations(MLIRContext *ctxt,
   if (!annotations || annotations.empty())
     return ArrayAttr::get(ctxt, retval);
   for (auto opAttr : annotations) {
-    std::optional<int64_t> maybeFieldID;
+    std::optional<uint64_t> maybeFieldID;
     DictionaryAttr annotation;
     annotation = opAttr.dyn_cast<DictionaryAttr>();
     if (annotations)
@@ -563,7 +567,12 @@ bool TypeLoweringVisitor::lowerProducer(
     return false;
   SmallVector<FlatBundleFieldEntry, 8> fieldTypes;
 
-  if (!peelType(srcType, fieldTypes, aggregatePreservationMode))
+  // FIXME: Don't presereve aggregates on RefType operations for now. This is
+  // workaround for MemTap which causes type mismatches (issue 4479).
+  if (!peelType(srcType, fieldTypes,
+                isa<RefResolveOp, RefSendOp, RefSubOp>(op)
+                    ? PreserveAggregate::None
+                    : aggregatePreservationMode))
     return false;
 
   // If an aggregate value has a symbol, emit errors.

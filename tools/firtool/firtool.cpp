@@ -85,6 +85,10 @@ static cl::opt<bool>
                             "chunk independently"),
                    cl::init(false), cl::Hidden, cl::cat(mainCategory));
 
+static cl::list<std::string> includeDirs(
+    "I", cl::desc("Directory to search in when resolving source references"),
+    cl::value_desc("directory"), cl::Prefix, cl::cat(mainCategory));
+
 static cl::opt<bool>
     verifyDiagnostics("verify-diagnostics",
                       cl::desc("Check that emitted diagnostics match "
@@ -303,6 +307,11 @@ static cl::opt<bool>
     disableCheckCombCycles("disable-check-comb-cycles",
                            cl::desc("Disable the CheckCombCycles pass"),
                            cl::init(false), cl::Hidden, cl::cat(mainCategory));
+
+static cl::opt<bool> useOldCheckCombCycles(
+    "use-old-check-comb-cycles",
+    cl::desc("Use old CheckCombCycles pass, that does not support aggregates"),
+    cl::init(false), cl::Hidden, cl::cat(mainCategory));
 
 static cl::opt<bool> disableIMDCE("disable-imdce",
                                   cl::desc("Disable the IMDCE pass"),
@@ -692,14 +701,16 @@ static LogicalResult processBuffer(
         firrtl::createRandomizeRegisterInitPass());
 
   if (!disableCheckCombCycles) {
-    // TODO: Currently CheckCombCyles pass doesn't support aggregates so skip
-    // the pass for now.
-    if (preserveAggregate == firrtl::PreserveAggregate::None)
-      pm.nest<firrtl::CircuitOp>().addPass(firrtl::createCheckCombCyclesPass());
-    else
-      emitWarning(module->getLoc())
-          << "CheckCombCyclesPass doens't support aggregate "
-             "values yet so it is skipped\n";
+    if (useOldCheckCombCycles) {
+      if (preserveAggregate == firrtl::PreserveAggregate::None)
+        pm.nest<firrtl::CircuitOp>().addPass(
+            firrtl::createCheckCombCyclesPass());
+      else
+        emitWarning(module->getLoc())
+            << "CheckCombCyclesPass doens't support aggregate "
+               "values yet so it is skipped\n";
+    } else
+      pm.nest<firrtl::CircuitOp>().addPass(firrtl::createCheckCombLoopsPass());
   }
 
   // If we parsed a FIRRTL file and have optimizations enabled, clean it up.
@@ -934,6 +945,7 @@ static LogicalResult processInputSplit(
     std::optional<std::unique_ptr<llvm::ToolOutputFile>> &outputFile) {
   llvm::SourceMgr sourceMgr;
   sourceMgr.AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
+  sourceMgr.setIncludeDirs(includeDirs);
   if (!verifyDiagnostics) {
     SourceMgrDiagnosticHandler sourceMgrHandler(sourceMgr, &context);
     return processBuffer(context, ts, sourceMgr, outputFile);
