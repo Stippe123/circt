@@ -238,7 +238,7 @@ def HWModuleOp : HWModuleOpBase<"module",
   let hasVerifier = 1;
 }
 
-def HWModuleExternOp : HWModuleOpBase<"module.extern"> {
+def HWModuleExternOp : HWModuleOpBase<"module.extern",[]> {
   let summary = "HW external Module";
   let description = [{
     The "hw.module.extern" operation represents an external reference to a
@@ -254,7 +254,8 @@ def HWModuleExternOp : HWModuleOpBase<"module.extern"> {
                        OptionalAttr<DictArrayAttr>:$res_attrs,
                        StrArrayAttr:$argNames, StrArrayAttr:$resultNames,
                        ParamDeclArrayAttr:$parameters,
-                       OptionalAttr<StrAttr>:$verilogName);
+                       OptionalAttr<StrAttr>:$verilogName,
+                       OptionalAttr<DictionaryAttr>:$esiWrap);
   let results = (outs);
   let regions = (region AnyRegion:$body);
 
